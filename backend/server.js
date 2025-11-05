@@ -6,8 +6,11 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-
-app.use(cors());
+app.use(cors({
+  origin: "https://slotswapper-frontend-4zls.onrender.com", // Only allow React dev server
+  methods: ["GET", "POST","PUT","DELETE"],        // Allowed HTTP methods
+  credentials: true                // Allow cookies/auth headers if needed 
+}));
 app.use(express.json());
 
 // MongoDB connection

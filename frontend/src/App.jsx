@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 
-const API_URL = 'http://localhost:5000';
+const API_URL = 'https://slotswapper-backend-9fsy.onrender.com';
 
 function App() {
   const [user, setUser] = useState(() => {

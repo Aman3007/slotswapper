@@ -1,52 +1,42 @@
+
 import React, { useState, useEffect } from 'react';
 
 const API_URL = 'http://localhost:5000';
 
 function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user'));
+    } catch {
+      return null;
+    }
+  });
   const [token, setToken] = useState(localStorage.getItem('token'));
-  const [page, setPage] = useState('login');
+  const [page, setPage] = useState(token && localStorage.getItem('user') ? 'app' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [isSignup, setIsSignup] = useState(false);
   const [error, setError] = useState('');
-  
+
   const [events, setEvents] = useState([]);
   const [marketplace, setMarketplace] = useState([]);
   const [requests, setRequests] = useState([]);
   const [tab, setTab] = useState('my-events');
-  
+
   const [showNewEvent, setShowNewEvent] = useState(false);
   const [showSwapPicker, setShowSwapPicker] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  
+
   const [newTitle, setNewTitle] = useState('');
   const [newStart, setNewStart] = useState('');
   const [newEnd, setNewEnd] = useState('');
 
   useEffect(() => {
-    if (token) {
-      fetchUser();
-    }
-  }, [token]);
-
-  useEffect(() => {
-    if (user) {
+    if (token && page === 'app') {
       loadData();
     }
-  }, [user]);
-
-  async function fetchUser() {
-    try {
-      const decoded = JSON.parse(atob(token.split('.')[1]));
-      setUser({ id: decoded.userId });
-      setPage('app');
-    } catch (err) {
-      localStorage.removeItem('token');
-      setToken(null);
-    }
-  }
+  }, [token, page]);
 
   async function loadData() {
     try {
@@ -62,9 +52,13 @@ function App() {
         })
       ]);
 
-      setEvents(await eventsRes.json());
-      setMarketplace(await marketplaceRes.json());
-      setRequests(await requestsRes.json());
+      const ev = await eventsRes.json();
+      const mk = await marketplaceRes.json();
+      const rq = await requestsRes.json();
+
+      setEvents(ev);
+      setMarketplace(mk);
+      setRequests(rq);
     } catch (err) {
       console.error('Error loading data:', err);
     }
@@ -75,7 +69,7 @@ function App() {
     try {
       const endpoint = isSignup ? '/auth/signup' : '/auth/login';
       const body = isSignup ? { name, email, password } : { email, password };
-      
+
       const res = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -83,28 +77,45 @@ function App() {
       });
 
       const data = await res.json();
-      
+
       if (!res.ok) {
         setError(data.error || 'Authentication failed');
         return;
       }
 
+      if (!data.token) {
+        setError('No token received from server');
+        return;
+      }
+
+      // Expect backend to return { token, user }
+      // user should include at least { id, name, email }
       localStorage.setItem('token', data.token);
+      if (data.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+        setUser(data.user);
+      }
       setToken(data.token);
-      setUser(data.user);
       setPage('app');
+      // clear form
+      setEmail('');
+      setPassword('');
+      setName('');
     } catch (err) {
+      console.error(err);
       setError('Network error');
     }
   }
 
   function logout() {
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setToken(null);
     setUser(null);
     setPage('login');
     setEmail('');
     setPassword('');
+    setName('');
   }
 
   async function createEvent() {
@@ -129,6 +140,9 @@ function App() {
         setNewEnd('');
         setShowNewEvent(false);
         loadData();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Error creating event');
       }
     } catch (err) {
       alert('Error creating event');
@@ -137,10 +151,10 @@ function App() {
 
   async function toggleStatus(id, current) {
     if (current === 'SWAP_PENDING') return;
-    
+
     try {
       const newStatus = current === 'SWAPPABLE' ? 'BUSY' : 'SWAPPABLE';
-      await fetch(`${API_URL}/api/events/${id}`, {
+      const res = await fetch(`${API_URL}/api/events/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -148,6 +162,11 @@ function App() {
         },
         body: JSON.stringify({ status: newStatus })
       });
+      if (!res.ok) {
+        const d = await res.json();
+        alert(d.error || 'Error updating event');
+        return;
+      }
       loadData();
     } catch (err) {
       alert('Error updating event');
@@ -169,7 +188,7 @@ function App() {
         },
         body: JSON.stringify({
           mySlotId,
-          theirSlotId: selectedSlot.id
+          theirSlotId: selectedSlot.id || selectedSlot._id || selectedSlot.id
         })
       });
 
@@ -179,7 +198,7 @@ function App() {
         loadData();
       } else {
         const data = await res.json();
-        alert(data.error);
+        alert(data.error || 'Error creating swap request');
       }
     } catch (err) {
       alert('Error creating swap request');
@@ -188,7 +207,7 @@ function App() {
 
   async function respondSwap(reqId, accept) {
     try {
-      await fetch(`${API_URL}/api/swap-response/${reqId}`, {
+      const res = await fetch(`${API_URL}/api/swap-response/${reqId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -196,6 +215,11 @@ function App() {
         },
         body: JSON.stringify({ action: accept ? 'ACCEPT' : 'REJECT' })
       });
+      if (!res.ok) {
+        const d = await res.json();
+        alert(d.error || 'Error responding to swap');
+        return;
+      }
       loadData();
     } catch (err) {
       alert('Error responding to swap');
@@ -203,6 +227,7 @@ function App() {
   }
 
   function formatTime(t) {
+    if (!t) return '';
     return new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
@@ -274,7 +299,7 @@ function App() {
         <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0, fontSize: '24px' }}>SlotSwapper</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <span style={{ fontSize: '14px' }}>Hi, User</span>
+            <span style={{ fontSize: '14px' }}>Hi, {user?.name || 'User'}</span>
             <button onClick={logout} style={{ padding: '8px 16px', background: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
               Logout
             </button>
@@ -343,14 +368,14 @@ function App() {
           <div>
             <h2 style={{ marginBottom: '20px' }}>Available Slots</h2>
             {marketplace.map(slot => (
-              <div key={slot.id} style={{ background: 'white', padding: '20px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ddd' }}>
+              <div key={slot.id || slot._id} style={{ background: 'white', padding: '20px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ddd' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
                     <h3 style={{ margin: '0 0 10px' }}>{slot.title}</h3>
                     <p style={{ margin: '0 0 5px', color: '#666', fontSize: '14px' }}>
                       {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
                     </p>
-                    <p style={{ margin: 0, color: '#999', fontSize: '13px' }}>Owner: {slot.ownerName}</p>
+                    <p style={{ margin: 0, color: '#999', fontSize: '13px' }}>Owner: {slot.ownerName || slot.owner?.name}</p>
                   </div>
                   <button
                     onClick={() => requestSwap(slot)}
@@ -371,7 +396,7 @@ function App() {
             {requests.filter(r => r.incoming).map(req => (
               <div key={req.id} style={{ background: 'white', padding: '20px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ddd' }}>
                 <div style={{ marginBottom: '15px' }}>
-                  <strong>{req.from.name}</strong> wants to swap
+                  <strong>{req.from?.name || req.from?.email || 'User'}</strong> wants to swap
                   <span style={{ marginLeft: '10px', padding: '2px 8px', background: req.status === 'PENDING' ? '#fff3e0' : req.status === 'ACCEPTED' ? '#e8f5e9' : '#ffebee', borderRadius: '8px', fontSize: '12px' }}>
                     {req.status}
                   </span>
@@ -406,7 +431,7 @@ function App() {
             {requests.filter(r => !r.incoming).map(req => (
               <div key={req.id} style={{ background: 'white', padding: '20px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ddd' }}>
                 <div style={{ marginBottom: '15px' }}>
-                  Request to <strong>{req.to.name}</strong>
+                  Request to <strong>{req.to?.name || req.to?.email || 'User'}</strong>
                   <span style={{ marginLeft: '10px', padding: '2px 8px', background: req.status === 'PENDING' ? '#fff3e0' : req.status === 'ACCEPTED' ? '#e8f5e9' : '#ffebee', borderRadius: '8px', fontSize: '12px' }}>
                     {req.status}
                   </span>
@@ -463,7 +488,7 @@ function App() {
           <div style={{ background: 'white', padding: '30px', borderRadius: '8px', width: '100%', maxWidth: '600px' }}>
             <h2 style={{ marginTop: 0 }}>Pick your slot</h2>
             <p style={{ color: '#666', marginBottom: '20px' }}>
-              Requesting: <strong>{selectedSlot.title}</strong> ({formatTime(selectedSlot.startTime)})
+              Requesting: <strong>{selectedSlot?.title}</strong> ({formatTime(selectedSlot?.startTime)})
             </p>
             {events.filter(e => e.status === 'SWAPPABLE').map(evt => (
               <div
